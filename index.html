@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hand Control System</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0a0a1a;
+      overflow: hidden;
+      height: 100vh;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    #appContainer {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      opacity: 0.3;
+    }
+
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      transform: scaleX(-1);
+    }
+
+    #welcomeScreen {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      flex-direction: column;
+      color: white;
+      text-align: center;
+      background: linear-gradient(135deg, #0a0a2e 0%, #1a1a4e 100%);
+    }
+
+    #startBtn {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      border: none;
+      padding: 25px 60px;
+      font-size: 24px;
+      border-radius: 50px;
+      cursor: pointer;
+      font-weight: bold;
+      margin-top: 30px;
+      letter-spacing: 2px;
+      box-shadow: 0 10px 40px rgba(102,126,234,0.4);
+      transition: all 0.3s;
+    }
+
+    #startBtn:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 15px 50px rgba(102,126,234,0.6);
+    }
+
+    h1 {
+      font-size: 60px;
+      margin-bottom: 10px;
+    }
+
+    .subtitle {
+      color: #aaa;
+      font-size: 20px;
+    }
+
+    /* HUD Interface */
+    .hud {
+      position: absolute;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(15px);
+      -webkit-backdrop-filter: blur(15px);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 15px;
+      padding: 15px;
+      color: white;
+      z-index: 20;
+    }
+
+    #gestureHUD {
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      min-width: 200px;
+    }
+
+    #gestureIcon {
+      font-size: 50px;
+      display: block;
+    }
+
+    #gestureLabel {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: #aaa;
+    }
+
+    #gestureName {
+      font-size: 24px;
+      font-weight: bold;
+      margin-top: 5px;
+    }
+
+    #sliderHUD {
+      top: 50%;
+      right: 20px;
+      transform: translateY(-50%);
+      width: 50px;
+      height: 300px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .slider-track {
+      width: 10px;
+      height: 200px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 5px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .slider-fill {
+      position: absolute;
+      bottom: 0;
+      width: 100%;
+      background: linear-gradient(to top, #667eea, #764ba2);
+      border-radius: 5px;
+      transition: height 0.1s;
+    }
+
+    .slider-value {
+      font-size: 14px;
+      font-weight: bold;
+      color: #667eea;
+    }
+
+    #colorHUD {
+      top: 50%;
+      left: 20px;
+      transform: translateY(-50%);
+      text-align: center;
+    }
+
+    .color-preview {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      margin: 10px auto;
+      border: 3px solid white;
+      transition: background 0.2s;
+    }
+
+    #modeHUD {
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+    }
+
+    .mode-btn {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.3);
+      color: white;
+      padding: 10px 20px;
+      border-radius: 25px;
+      cursor: pointer;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      transition: all 0.2s;
+    }
+
+    .mode-btn.active {
+      background: #667eea;
+      border-color: #667eea;
+    }
+
+    #target {
+      position: absolute;
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(102,126,234,0.8), rgba(118,75,162,0.4));
+      border: 3px solid white;
+      transform: translate(-50%, -50%);
+      transition: all 0.05s;
+      pointer-events: none;
+      box-shadow: 0 0 30px rgba(102,126,234,0.6);
+      z-index: 15;
+    }
+
+    #scoreDisplay {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(15px);
+      padding: 10px 20px;
+      border-radius: 25px;
+      color: white;
+      font-size: 20px;
+      font-weight: bold;
+      z-index: 20;
+    }
+
+    /* Particles */
+    .particle {
+      position: absolute;
+      pointer-events: none;
+      border-radius: 50%;
+      animation: particleAnim 0.8s ease-out forwards;
+      z-index: 10;
+    }
+
+    @keyframes particleAnim {
+      0% { transform: translate(0,0) scale(1); opacity: 1; }
+      100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
+    }
+
+    @media (max-width: 768px) {
+      h1 { font-size: 35px; }
+      .subtitle { font-size: 16px; }
+      #startBtn { padding: 20px 40px; font-size: 18px; }
+      #gestureIcon { font-size: 35px; }
+      #gestureName { font-size: 18px; }
+      .color-preview { width: 40px; height: 40px; }
+      #target { width: 60px; height: 60px; }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="welcomeScreen">
+    <h1>🖐️ Hand Controller</h1>
+    <p class="subtitle">Control elements with gestures & movement</p>
+    <button id="startBtn" onclick="initApp()">
+      🎥 START CAMERA
+    </button>
+  </div>
+
+  <div id="appContainer">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    
+    <!-- Target that follows index finger -->
+    <div id="target"></div>
+    
+    <!-- Gesture display -->
+    <div id="gestureHUD" class="hud">
+      <span id="gestureIcon">👋</span>
+      <div id="gestureLabel">GESTURE</div>
+      <div id="gestureName">Waiting</div>
+    </div>
+
+    <!-- Vertical slider controlled by hand height -->
+    <div id="sliderHUD" class="hud">
+      <span style="font-size:12px;">VOL</span>
+      <div class="slider-track">
+        <div class="slider-fill" id="sliderFill"></div>
+      </div>
+      <span class="slider-value" id="sliderValue">50</span>
+    </div>
+
+    <!-- Color picker controlled by hand position -->
+    <div id="colorHUD" class="hud">
+      <span style="font-size:12px;">COLOR</span>
+      <div class="color-preview" id="colorPreview"></div>
+      <span style="font-size:10px;color:#aaa;">from hand</span>
+    </div>
+
+    <!-- Mode switcher -->
+    <div id="modeHUD" class="hud">
+      <button class="mode-btn active" onclick="setMode('cursor')">🎯 Cursor</button>
+      <button class="mode-btn" onclick="setMode('draw')">✏️ Draw</button>
+      <button class="mode-btn" onclick="setMode('particles')">✨ Particles</button>
+    </div>
+
+    <div id="scoreDisplay">Score: 0</div>
+  </div>
+
+  <!-- MediaPipe -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js"></script>
+
+  <script>
+    // State
+    let currentMode = 'cursor';
+    let indexPos = { x: 0.5, y: 0.5 };
+    let thumbPos = { x: 0.5, y: 0.5 };
+    let palmPos = { x: 0.5, y: 0.5 };
+    let isPinching = false;
+    let score = 0;
+    let drawCanvas = null;
+    let drawCtx = null;
+    let lastDrawPos = null;
+    let targets = [];
+    let targetSpawnTimer = 0;
+
+    window.initApp = async function() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: 640, height: 480 }
+        });
+
+        document.getElementById('welcomeScreen').style.display = 'none';
+        document.getElementById('appContainer').style.display = 'block';
+
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+
+        await new Promise(resolve => {
+          video.onloadedmetadata = () => { video.play(); resolve(); };
+        });
+
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Setup drawing canvas
+        drawCanvas = document.createElement('canvas');
+        drawCanvas.width = window.innerWidth;
+        drawCanvas.height = window.innerHeight;
+        drawCanvas.style.position = 'absolute';
+        drawCanvas.style.top = '0';
+        drawCanvas.style.left = '0';
+        drawCanvas.style.pointerEvents = 'none';
+        drawCanvas.style.zIndex = '12';
+        document.getElementById('appContainer').appendChild(drawCanvas);
+        drawCtx = drawCanvas.getContext('2d');
+
+        const hands = new Hands({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`
+        });
+
+        hands.setOptions({
+          maxNumHands: 2,
+          modelComplexity: 1,
+          minDetectionConfidence: 0.7,
+          minTrackingConfidence: 0.5
+        });
+
+        hands.onResults((results) => {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+          if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const lm = results.multiHandLandmarks[0];
+
+            // Draw skeleton
+            if (window.drawConnectors && window.HANDS_CONNECTIONS) {
+              drawConnectors(ctx, lm, HANDS_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+            }
+            if (window.drawLandmarks) {
+              drawLandmarks(ctx, lm, {color: '#FF0000', lineWidth: 1, radius: 3});
+            }
+
+            // Extract positions (mirror X)
+            indexPos = { x: 1 - lm[8].x, y: lm[8].y };
+            thumbPos = { x: 1 - lm[4].x, y: lm[4].y };
+            palmPos = { x: 1 - lm[9].x, y: lm[9].y };
+
+            // Pinch detection
+            const pinchDist = Math.hypot(indexPos.x - thumbPos.x, indexPos.y - thumbPos.y);
+            isPinching = pinchDist < 0.05;
+
+            // Update UI
+            updateTarget();
+            updateSlider();
+            updateColor();
+            updateGesture(lm);
+            
+            // Handle modes
+            if (currentMode === 'draw' && isPinching) {
+              drawAtPosition();
+            }
+            if (currentMode === 'particles' && isPinching) {
+              spawnParticles();
+            }
+            
+            // Handle targets
+            updateTargets();
+            
+          } else {
+            document.getElementById('gestureName').textContent = 'No Hand';
+            document.getElementById('gestureIcon').textContent = '🔍';
+          }
+        });
+
+        const camera = new Camera(video, {
+          onFrame: async () => { await hands.send({ image: video }); },
+          width: 640,
+          height: 480
+        });
+
+        camera.start();
+        console.log('App started!');
+
+      } catch (error) {
+        alert("Camera error: " + error.message);
+      }
+    };
+
+    function updateTarget() {
+      const target = document.getElementById('target');
+      target.style.left = (indexPos.x * window.innerWidth) + 'px';
+      target.style.top = (indexPos.y * window.innerHeight) + 'px';
+      
+      // Color based on pinch
+      if (isPinching) {
+        target.style.background = 'radial-gradient(circle, rgba(255,71,87,0.9), rgba(255,71,87,0.5))';
+        target.style.boxShadow = '0 0 50px rgba(255,71,87,0.8)';
+        target.style.transform = 'translate(-50%, -50%) scale(1.3)';
+      } else {
+        target.style.background = 'radial-gradient(circle, rgba(102,126,234,0.8), rgba(118,75,162,0.4))';
+        target.style.boxShadow = '0 0 30px rgba(102,126,234,0.6)';
+        target.style.transform = 'translate(-50%, -50%) scale(1)';
+      }
+    }
+
+    function updateSlider() {
+      // Hand height controls slider
+      const sliderVal = Math.max(0, Math.min(100, Math.round((1 - palmPos.y) * 100)));
+      document.getElementById('sliderFill').style.height = sliderVal + '%';
+      document.getElementById('sliderValue').textContent = sliderVal;
+    }
+
+    function updateColor() {
+      // Hand X position controls hue
+      const hue = Math.round(palmPos.x * 360);
+      const color = `hsl(${hue}, 80%, 60%)`;
+      document.getElementById('colorPreview').style.background = color;
+    }
+
+    function updateGesture(lm) {
+      const indexUp = lm[8].y < lm[6].y;
+      const middleUp = lm[12].y < lm[10].y;
+      const ringUp = lm[16].y < lm[14].y;
+      const pinkyUp = lm[20].y < lm[18].y;
+      const fingersUp = [indexUp, middleUp, ringUp, pinkyUp].filter(x => x).length;
+
+      let gestureName = '';
+      let gestureIcon = '';
+
+      if (isPinching) {
+        gestureName = 'PINCHING';
+        gestureIcon = '🤏';
+      } else if (fingersUp === 0) {
+        gestureName = 'FIST';
+        gestureIcon = '✊';
+      } else if (fingersUp === 1 && indexUp) {
+        gestureName = 'POINTING';
+        gestureIcon = '☝️';
+      } else if (fingersUp === 2 && indexUp && middleUp) {
+        gestureName = 'PEACE';
+        gestureIcon = '✌️';
+      } else if (fingersUp >= 4) {
+        gestureName = 'OPEN HAND';
+        gestureIcon = '🖐️';
+      } else {
+        gestureName = 'GESTURE';
+        gestureIcon = '👋';
+      }
+
+      document.getElementById('gestureName').textContent = gestureName;
+      document.getElementById('gestureIcon').textContent = gestureIcon;
+    }
+
+    function setMode(mode) {
+      currentMode = mode;
+      document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+      
+      // Clear drawing when switching
+      if (drawCtx) {
+        drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+        lastDrawPos = null;
+      }
+    }
+
+    function drawAtPosition() {
+      const x = indexPos.x * drawCanvas.width;
+      const y = indexPos.y * drawCanvas.height;
+
+      drawCtx.strokeStyle = `hsl(${palmPos.x * 360}, 80%, 60%)`;
+      drawCtx.lineWidth = 4;
+      drawCtx.lineCap = 'round';
+      
+      if (lastDrawPos) {
+        drawCtx.beginPath();
+        drawCtx.moveTo(lastDrawPos.x, lastDrawPos.y);
+        drawCtx.lineTo(x, y);
+        drawCtx.stroke();
+      }
+      
+      lastDrawPos = { x, y };
+    }
+
+    function spawnParticles() {
+      const x = indexPos.x * window.innerWidth;
+      const y = indexPos.y * window.innerHeight;
+      
+      for (let i = 0; i < 3; i++) {
+        const particle = document.createElement('div');
+        particle.className = 'particle';
+        particle.style.left = x + 'px';
+        particle.style.top = y + 'px';
+        const size = Math.random() * 20 + 5;
+        particle.style.width = size + 'px';
+        particle.style.height = size + 'px';
+        particle.style.background = `hsl(${Math.random() * 360}, 80%, 60%)`;
+        
+        const angle = Math.random() * Math.PI * 2;
+        const dist = Math.random() * 100 + 30;
+        particle.style.setProperty('--tx', Math.cos(angle) * dist + 'px');
+        particle.style.setProperty('--ty', Math.sin(angle) * dist + 'px');
+        
+        document.getElementById('appContainer').appendChild(particle);
+        setTimeout(() => particle.remove(), 800);
+      }
+    }
+
+    function updateTargets() {
+      // Spawn targets periodically
+      targetSpawnTimer++;
+      if (targetSpawnTimer > 60 && targets.length < 3) {
+        targetSpawnTimer = 0;
+        spawnTarget();
+      }
+
+      // Check collisions
+      const targetX = indexPos.x * window.innerWidth;
+      const targetY = indexPos.y * window.innerHeight;
+
+      targets = targets.filter(t => {
+        const dist = Math.hypot(targetX - t.x, targetY - t.y);
+        if (dist < 40 && isPinching) {
+          score += 10;
+          document.getElementById('scoreDisplay').textContent = 'Score: ' + score;
+          t.element.remove();
+          return false;
+        }
+        
+        // Move targets slowly
+        t.x += t.vx;
+        t.y += t.vy;
+        if (t.x < 0 || t.x > window.innerWidth) t.vx *= -1;
+        if (t.y < 0 || t.y > window.innerHeight) t.vy *= -1;
+        t.element.style.left = t.x + 'px';
+        t.element.style.top = t.y + 'px';
+        
+        return true;
+      });
+    }
+
+    function spawnTarget() {
+      const x = Math.random() * (window.innerWidth - 100) + 50;
+      const y = Math.random() * (window.innerHeight - 100) + 50;
+      const targetEl = document.createElement('div');
+      targetEl.style.cssText = `
+        position: absolute;
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background: radial-gradient(circle, #ffd700, #ff8c00);
+        border: 3px solid white;
+        left: ${x}px;
+        top: ${y}px;
+        pointer-events: none;
+        z-index: 13;
+        box-shadow: 0 0 20px rgba(255,215,0,0.6);
+        animation: float 2s ease-in-out infinite;
+      `;
+      document.getElementById('appContainer').appendChild(targetEl);
+      
+      targets.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 2,
+        vy: (Math.random() - 0.5) * 2,
+        element: targetEl
+      });
+    }
+
+    // Clean up draw canvas on mode switch
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'c' && currentMode === 'draw') {
+        drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+        lastDrawPos = null;
+      }
+    });
+  </script>
+</body>
+</html>
