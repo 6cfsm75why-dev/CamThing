@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hand Gesture Tracker</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #0a0a2e;
+      font-family: Arial, sans-serif;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      color: white;
+    }
+
+    #startBtn {
+      background: #ff4757;
+      color: white;
+      border: none;
+      padding: 30px 60px;
+      font-size: 28px;
+      border-radius: 20px;
+      cursor: pointer;
+      font-weight: bold;
+      box-shadow: 0 10px 30px rgba(255,71,87,0.5);
+      transition: transform 0.2s;
+      z-index: 9999;
+      position: relative;
+    }
+
+    #startBtn:hover {
+      transform: scale(1.05);
+    }
+
+    #startBtn:active {
+      transform: scale(0.95);
+    }
+
+    h1 {
+      font-size: 50px;
+      margin-bottom: 10px;
+    }
+
+    p {
+      color: #aaa;
+      margin-bottom: 30px;
+      font-size: 18px;
+    }
+
+    #appContainer {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      transform: scaleX(-1);
+    }
+
+    #gestureDisplay {
+      position: absolute;
+      top: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.8);
+      padding: 20px 40px;
+      border-radius: 50px;
+      font-size: 30px;
+      font-weight: bold;
+      z-index: 10;
+      border: 3px solid white;
+      text-align: center;
+    }
+
+    #status {
+      position: absolute;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.8);
+      padding: 15px 30px;
+      border-radius: 30px;
+      font-size: 18px;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="welcomeScreen">
+    <h1>✋ Hand Tracker</h1>
+    <p>Click the button below to start</p>
+    <button id="startBtn" onclick="initCamera()">
+      🎥 START CAMERA
+    </button>
+  </div>
+
+  <div id="appContainer">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <div id="gestureDisplay">Waiting...</div>
+    <div id="status">Show your hand</div>
+  </div>
+
+  <!-- MediaPipe Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js"></script>
+
+  <script>
+    console.log("Script loaded - waiting for button click");
+
+    window.initCamera = async function() {
+      console.log("Button clicked!");
+      
+      try {
+        // Request camera permission directly
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user' }
+        });
+        
+        console.log("Camera permission granted");
+        
+        // Hide welcome, show app
+        document.getElementById('welcomeScreen').style.display = 'none';
+        document.getElementById('appContainer').style.display = 'block';
+        
+        // Setup video
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+        
+        await new Promise(resolve => {
+          video.onloadedmetadata = () => {
+            video.play();
+            resolve();
+          };
+        });
+        
+        console.log("Video playing");
+        
+        // Setup canvas
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        
+        // Setup MediaPipe
+        const hands = new Hands({
+          locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`;
+          }
+        });
+        
+        hands.setOptions({
+          maxNumHands: 1,
+          modelComplexity: 1,
+          minDetectionConfidence: 0.7,
+          minTrackingConfidence: 0.5
+        });
+        
+        hands.onResults((results) => {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+          
+          const display = document.getElementById('gestureDisplay');
+          const status = document.getElementById('status');
+          
+          if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const lm = results.multiHandLandmarks[0];
+            
+            // Draw landmarks
+            if (window.drawConnectors && window.HANDS_CONNECTIONS) {
+              drawConnectors(ctx, lm, HANDS_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+            }
+            if (window.drawLandmarks) {
+              drawLandmarks(ctx, lm, {color: '#FF0000', lineWidth: 1, radius: 3});
+            }
+            
+            // Simple gesture detection
+            const indexUp = lm[8].y < lm[6].y;
+            const middleUp = lm[12].y < lm[10].y;
+            const ringUp = lm[16].y < lm[14].y;
+            const pinkyUp = lm[20].y < lm[18].y;
+            
+            const fingersUp = [indexUp, middleUp, ringUp, pinkyUp].filter(x => x).length;
+            
+            if (fingersUp === 0) {
+              display.textContent = '✊ FIST';
+              display.style.color = '#ff4444';
+              display.style.borderColor = '#ff4444';
+              status.textContent = '🔴 Fist detected';
+            } else if (fingersUp === 1 && indexUp) {
+              display.textContent = '☝️ POINTING';
+              display.style.color = '#4da6ff';
+              display.style.borderColor = '#4da6ff';
+              status.textContent = '🔵 One finger';
+            } else if (fingersUp === 2 && indexUp && middleUp) {
+              display.textContent = '✌️ PEACE';
+              display.style.color = '#4dff4d';
+              display.style.borderColor = '#4dff4d';
+              status.textContent = '🟢 Two fingers';
+            } else if (fingersUp >= 3) {
+              display.textContent = '🖐️ OPEN HAND';
+              display.style.color = '#ffd700';
+              display.style.borderColor = '#ffd700';
+              status.textContent = '🟡 Open palm';
+            } else {
+              display.textContent = '👋 GESTURE';
+              display.style.color = 'white';
+              display.style.borderColor = 'white';
+              status.textContent = 'Show a gesture';
+            }
+          } else {
+            display.textContent = 'NO HAND';
+            display.style.color = 'white';
+            display.style.borderColor = 'white';
+            status.textContent = 'Hold hand up to camera';
+          }
+        });
+        
+        // Start camera loop
+        const camera = new Camera(video, {
+          onFrame: async () => {
+            await hands.send({ image: video });
+          },
+          width: 640,
+          height: 480
+        });
+        
+        camera.start();
+        console.log("Everything started!");
+        
+      } catch (error) {
+        console.error("Error:", error);
+        alert("Camera error: " + error.message + "\n\nPlease allow camera access in your browser settings and try again.");
+      }
+    };
+  </script>
+</body>
+</html>
