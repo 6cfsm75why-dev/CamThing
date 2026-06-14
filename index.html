@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Hand Gesture Magic | MediaPipe + Three.js</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    #info {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 12px 25px;
+      border-radius: 40px;
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+    .gesture-badge {
+      background: #ff4757;
+      color: white;
+      padding: 5px 18px;
+      border-radius: 20px;
+      font-weight: bold;
+      font-size: 1.2rem;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    #gestureText {
+      color: #ffd700;
+      font-weight: 600;
+    }
+    #instruction {
+      position: absolute;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.75);
+      color: #ccc;
+      padding: 10px 25px;
+      border-radius: 30px;
+      backdrop-filter: blur(8px);
+      font-size: 0.9rem;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+    }
+    #videoPreview {
+      position: absolute;
+      bottom: 30px;
+      right: 30px;
+      width: 200px;
+      height: 150px;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 8px 25px rgba(0,0,0,0.5);
+      border: 2px solid rgba(255,255,255,0.7);
+      background: #000;
+      transform: scaleX(-1); /* mirror selfie view */
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    @media (max-width: 700px) {
+      #instruction {
+        font-size: 0.7rem;
+        white-space: normal;
+        width: 90%;
+        text-align: center;
+        bottom: 20px;
+      }
+      #videoPreview {
+        width: 120px;
+        height: 90px;
+        bottom: 20px;
+        right: 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="info">
+    <span>✋</span>
+    <span>GESTURE: <span id="gestureText" class="gesture-badge">WAITING...</span></span>
+    <span id="effectStatus" style="color:#aaa; margin-left:5px;"></span>
+  </div>
+  <div id="instruction">
+    👆 ONE FINGER: Blue burst & rotate 🔵 | ✌️ TWO FINGERS: Green sparkles & scale 🟢 | 🖐️ OPEN HAND: Restore & gold glow 🟡
+  </div>
+  <div id="videoPreview">
+    <video id="inputVideo" autoplay playsinline muted></video>
+  </div>
+
+  <!-- Import maps and libraries -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+    
+    // ---------- SETUP THREE.JS SCENE ----------
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a1a);
+    
+    // Add some subtle stars
+    const starsGeometry = new THREE.BufferGeometry();
+    const starsCount = 800;
+    const starsPositions = new Float32Array(starsCount * 3);
+    for (let i = 0; i < starsCount * 3; i += 3) {
+      starsPositions[i] = (Math.random() - 0.5) * 40;
+      starsPositions[i+1] = (Math.random() - 0.5) * 25;
+      starsPositions[i+2] = (Math.random() - 0.5) * 20;
+    }
+    starsGeometry.setAttribute('position', new THREE.BufferAttribute(starsPositions, 3));
+    const starsMaterial = new THREE.PointsMaterial({color: 0xffffff, size: 0.08});
+    const stars = new THREE.Points(starsGeometry, starsMaterial);
+    scene.add(stars);
+    
+    // Main central object that reacts to gestures
+    const centralGroup = new THREE.Group();
+    
+    // A torus knot as primary display
+    const knotGeometry = new THREE.TorusKnotGeometry(1.2, 0.35, 180, 24);
+    const knotMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0x4a90e2, 
+      roughness: 0.2, 
+      metalness: 0.7,
+      emissive: new THREE.Color(0x0a1a3a)
+    });
+    const knot = new THREE.Mesh(knotGeometry, knotMaterial);
+    centralGroup.add(knot);
+    
+    // Surrounding particles (will be animated based on gesture)
+    const particlesGeometry = new THREE.BufferGeometry();
+    const particleCount = 400;
+    const particlePositions = new Float32Array(particleCount * 3);
+    const particleColors = new Float32Array(particleCount * 3);
+    for (let i = 0; i < particleCount * 3; i += 3) {
+      // spherical distribution
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos((Math.random() * 2) - 1);
+      const radius = 1.8 + Math.random() * 0.8;
+      particlePositions[i] = Math.sin(phi) * Math.cos(theta) * radius;
+      particlePositions[i+1] = Math.sin(phi) * Math.sin(theta) * radius;
+      particlePositions[i+2] = Math.cos(phi) * radius;
+      
+      particleColors[i] = 0.4 + Math.random() * 0.6;
+      particleColors[i+1] = 0.5 + Math.random() * 0.5;
+      particleColors[i+2] = 1.0;
+    }
+    particlesGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+    particlesGeometry.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
+    const particlesMat = new THREE.PointsMaterial({ 
+      size: 0.08, 
+      vertexColors: true, 
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const particles = new THREE.Points(particlesGeometry, particlesMat);
+    centralGroup.add(particles);
+    
+    // A glowing ring
+    const ringGeometry = new THREE.TorusGeometry(1.45, 0.05, 32, 64);
+    const ringMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0x3355aa, 
+      emissive: new THREE.Color(0x112244),
+      roughness: 0.4,
+      metalness: 0.6
+    });
+    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    centralGroup.add(ring);
+    
+    scene.add(centralGroup);
+    
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0x404080);
+    scene.add(ambientLight);
+    const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.9);
+    dirLight1.position.set(1, 2, 3);
+    scene.add(dirLight1);
+    const dirLight2 = new THREE.DirectionalLight(0xccddff, 0.6);
+    dirLight2.position.set(-2, -1, -1);
+    scene.add(dirLight2);
+    
+    // Camera
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(3, 1.8, 5);
+    camera.lookAt(0, 0, 0);
+    
+    // Renderers
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+    
+    // CSS2 Renderer for floating labels (optional)
+    const labelRenderer = new CSS2DRenderer();
+    labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    labelRenderer.domElement.style.position = 'absolute';
+    labelRenderer.domElement.style.top = '0px';
+    labelRenderer.domElement.style.left = '0px';
+    labelRenderer.domElement.style.pointerEvents = 'none'; // allow clicking through
+    document.body.appendChild(labelRenderer.domElement);
+    
+    // Controls (disabled for auto-rotation, but we manage rotation manually based on gesture)
+    // We'll use manual rotation updates.
+    
+    // ---------- MEDIAPIPE HANDS SETUP ----------
+    const videoElement = document.getElementById('inputVideo');
+    let gestureName = "NONE";
+    let currentGesture = "NONE";
+    let gestureConfidence = 0;
+    
+    // UI elements
+    const gestureTextEl = document.getElementById('gestureText');
+    const effectStatusEl = document.getElementById('effectStatus');
+    
+    // Target states for smooth transitions
+    let targetKnotColor = new THREE.Color(0x4a90e2);
+    let targetParticleColor = new THREE.Color(0x3355aa);
+    let targetRotationSpeed = { x: 0.002, y: 0.005, z: 0.0 };
+    let targetScale = 1.0;
+    let targetEmissive = new THREE.Color(0x0a1a3a);
+    
+    // Current interpolated values
+    let currentRotationSpeed = { x: 0.002, y: 0.005, z: 0.0 };
+    let currentScale = 1.0;
+    
+    // Additional effects
+    let burstParticles = null;
+    let sparkleTimer = 0;
+    
+    // Helper: create a burst of particles at center
+    function createBurst(colorHex, count = 60) {
+      if (burstParticles) {
+        scene.remove(burstParticles);
+        burstParticles.geometry.dispose();
+        burstParticles.material.dispose();
+      }
+      const geom = new THREE.BufferGeometry();
+      const positions = new Float32Array(count * 3);
+      const colors = new Float32Array(count * 3);
+      const color = new THREE.Color(colorHex);
+      for (let i = 0; i < count * 3; i += 3) {
+        positions[i] = 0;
+        positions[i+1] = 0;
+        positions[i+2] = 0;
+        colors[i] = color.r;
+        colors[i+1] = color.g;
+        colors[i+2] = color.b;
+      }
+      geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      const mat = new THREE.PointsMaterial({ 
+        size: 0.15, 
+        vertexColors: true, 
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      burstParticles = new THREE.Points(geom, mat);
+      scene.add(burstParticles);
+      
+      // Animate burst outward
+      const startTime = performance.now();
+      function animateBurst() {
+        const elapsed = (performance.now() - startTime) / 1000;
+        if (elapsed > 1.2 || !burstParticles) {
+          if (burstParticles) {
+            scene.remove(burstParticles);
+            burstParticles.geometry.dispose();
+            burstParticles.material.dispose();
+            burstParticles = null;
+          }
+          return;
+        }
+        const positionsAttr = burstParticles.geometry.attributes.position;
+        const array = positionsAttr.array;
+        const speed = 2.8;
+        for (let i = 0; i < array.length; i += 3) {
+          // random direction stored? We'll just use a deterministic spread based on index
+          const idx = i / 3;
+          const angle = idx * 0.15 + elapsed * 5;
+          const radius = elapsed * speed * (0.6 + Math.sin(idx) * 0.4);
+          array[i] = Math.cos(angle) * radius * 0.8;
+          array[i+1] = Math.sin(angle * 1.3) * radius * 0.7;
+          array[i+2] = Math.sin(angle * 0.7) * radius * 0.8;
+        }
+        positionsAttr.needsUpdate = true;
+        requestAnimationFrame(animateBurst);
+      }
+      animateBurst();
+    }
+    
+    // Sparkle effect around central group (modify particle sizes/colors)
+    function setSparkleEffect(active) {
+      if (active) {
+        particles.material.size = 0.12;
+        particles.material.color = new THREE.Color(0x88ff88);
+        ring.material.emissive = new THREE.Color(0x224422);
+        ring.material.color = new THREE.Color(0x66ff66);
+      } else {
+        particles.material.size = 0.08;
+        particles.material.color = new THREE.Color(0x3355aa);
+        ring.material.emissive = new THREE.Color(0x112244);
+        ring.material.color = new THREE.Color(0x3355aa);
+      }
+    }
+    
+    // Function to handle gesture updates
+    function updateGesture(gesture) {
+      if (gesture === currentGesture) return;
+      currentGesture = gesture;
+      
+      // Reset effects first
+      setSparkleEffect(false);
+      
+      switch (gesture) {
+        case "ONE_FINGER":
+          gestureTextEl.textContent = "ONE FINGER";
+          gestureTextEl.style.backgroundColor = "#0077ff";
+          effectStatusEl.textContent = "🔵 Blue Burst & Spin";
+          targetKnotColor = new THREE.Color(0x0088ff);
+          targetParticleColor = new THREE.Color(0x0044aa);
+          targetRotationSpeed = { x: 0.008, y: 0.015, z: 0.003 };
+          targetScale = 1.15;
+          targetEmissive = new THREE.Color(0x001122);
+          createBurst(0x0088ff, 80);
+          break;
+        case "TWO_FINGERS":
+          gestureTextEl.textContent = "TWO FINGERS";
+          gestureTextEl.style.backgroundColor = "#2ecc71";
+          effectStatusEl.textContent = "🟢 Green Sparkles & Scale";
+          targetKnotColor = new THREE.Color(0x2ecc71);
+          targetParticleColor = new THREE.Color(0x27ae60);
+          targetRotationSpeed = { x: 0.003, y: 0.006, z: 0.001 };
+          targetScale = 1.3;
+          targetEmissive = new THREE.Color(0x0a2a0a);
+          setSparkleEffect(true);
+          createBurst(0x2ecc71, 70);
+          break;
+        case "OPEN_HAND":
+          gestureTextEl.textContent = "OPEN HAND";
+          gestureTextEl.style.backgroundColor = "#f1c40f";
+          effectStatusEl.textContent = "🟡 Restore & Gold Glow";
+          targetKnotColor = new THREE.Color(0xf1c40f);
+          targetParticleColor = new THREE.Color(0xd4ac0d);
+          targetRotationSpeed = { x: 0.002, y: 0.005, z: 0.0 };
+          targetScale = 1.0;
+          targetEmissive = new THREE.Color(0x332200);
+          setSparkleEffect(false);
+          createBurst(0xf1c40f, 65);
+          break;
+        default:
+          gestureTextEl.textContent = "NONE";
+          gestureTextEl.style.backgroundColor = "#ff4757";
+          effectStatusEl.textContent = "⚪ Idle";
+          targetKnotColor = new THREE.Color(0x4a90e2);
+          targetParticleColor = new THREE.Color(0x3355aa);
+          targetRotationSpeed = { x: 0.002, y: 0.005, z: 0.0 };
+          targetScale = 1.0;
+          targetEmissive = new THREE.Color(0x0a1a3a);
+          setSparkleEffect(false);
+          break;
+      }
+    }
+    
+    // Initialize MediaPipe Hands
+    async function initMediaPipe() {
+      const { Hands } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js');
+      const { Camera } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js');
+      
+      const hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`
+      });
+      
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.6
+      });
+      
+      hands.onResults(onHandResults);
+      
+      const camera = new Camera(videoElement, {
+        onFrame: async () => {
+          await hands.send({ image: videoElement });
+        },
+        width: 640,
+        height: 480
+      });
+      camera.start();
+    }
+    
+    // Process hand landmarks and determine gesture
+    function onHandResults(results) {
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        const landmarks = results.multiHandLandmarks[0];
+        const gesture = detectGesture(landmarks);
+        updateGesture(gesture);
+      } else {
+        updateGesture("NONE");
+      }
+    }
+    
+    function detectGesture(landmarks) {
+      // Landmark indices: https://google.github.io/mediapipe/solutions/hands.html
+      // 4: thumb tip, 8: index tip, 12: middle tip, 16: ring tip, 20: pinky tip
+      // 2: thumb IP, 5: index MCP, etc.
+      
+      const fingerTips = [8, 12, 16, 20];
+      const fingerPips = [6, 10, 14, 18]; // PIP joints approximately
+      
+      // Check if fingers are extended (tip y < pip y) - note: y increases downward in image
+      let extendedCount = 0;
+      for (let i = 0; i < fingerTips.length; i++) {
+        const tipY = landmarks[fingerTips[i]].y;
+        const pipY = landmarks[fingerPips[i]].y;
+        if (tipY < pipY - 0.02) { // threshold to avoid noise
+          extendedCount++;
+        }
+      }
+      
+      // Thumb special check: compare x distance (since thumb moves differently)
+      const thumbTip = landmarks[4];
+      const thumbIp = landmarks[3];
+      const indexMcp = landmarks[5];
+      // Thumb extended if tip is further from index MCP than IP joint (simplified)
+      const thumbExtended = Math.abs(thumbTip.x - indexMcp.x) > Math.abs(thumbIp.x - indexMcp.x) + 0.03;
+      
+      if (thumbExtended) extendedCount++;
+      
+      // Determine gesture based on extended fingers
+      if (extendedCount === 5) {
+        return "OPEN_HAND";
+      } else if (extendedCount === 1 && isIndexExtended(landmarks)) {
+        return "ONE_FINGER";
+      } else if (extendedCount === 2 && isIndexAndMiddleExtended(landmarks)) {
+        return "TWO_FINGERS";
+      }
+      return "NONE";
+    }
+    
+    function isIndexExtended(landmarks) {
+      const tip8 = landmarks[8];
+      const pip6 = landmarks[6];
+      const mcp5 = landmarks[5];
+      return tip8.y < pip6.y && tip8.y < mcp5.y;
+    }
+    
+    function isIndexAndMiddleExtended(landmarks) {
+      const indexTip = landmarks[8];
+      const indexPip = landmarks[6];
+      const middleTip = landmarks[12];
+      const middlePip = landmarks[10];
+      return (indexTip.y < indexPip.y) && (middleTip.y < middlePip.y);
+    }
+    
+    // ---------- ANIMATION LOOP ----------
+    function animate() {
+      requestAnimationFrame(animate);
+      
+      // Smooth interpolation of properties
+      const lerpFactor = 0.08;
+      
+      // Color interpolation
+      knot.material.color.lerp(targetKnotColor, lerpFactor);
+      knot.material.emissive.lerp(targetEmissive, lerpFactor);
+      ring.material.color.lerp(targetParticleColor, lerpFactor * 0.8);
+      
+      // Rotation speed interpolation
+      currentRotationSpeed.x += (targetRotationSpeed.x - currentRotationSpeed.x) * lerpFactor;
+      currentRotationSpeed.y += (targetRotationSpeed.y - currentRotationSpeed.y) * lerpFactor;
+      currentRotationSpeed.z += (targetRotationSpeed.z - currentRotationSpeed.z) * lerpFactor;
+      
+      // Scale interpolation
+      currentScale += (targetScale - currentScale) * lerpFactor;
+      
+      // Apply transforms
+      centralGroup.rotation.x += currentRotationSpeed.x;
+      centralGroup.rotation.y += currentRotationSpeed.y;
+      centralGroup.rotation.z += currentRotationSpeed.z;
+      centralGroup.scale.set(currentScale, currentScale, currentScale);
+      
+      // Animate stars slowly
+      stars.rotation.y += 0.0001;
+      stars.rotation.x += 0.00005;
+      
+      // Update ring emissive based on gesture indirectly
+      if (currentGesture === "TWO_FINGERS") {
+        ring.material.emissive.lerp(new THREE.Color(0x226622), 0.1);
+      }
+      
+      // Render
+      renderer.render(scene, camera);
+      labelRenderer.render(scene, camera);
+    }
+    
+    // Start everything
+    window.addEventListener('resize', onWindowResize, false);
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    
+    // Kick off
+    initMediaPipe().then(() => {
+      console.log("MediaPipe Hands ready");
+    }).catch(err => {
+      console.error("MediaPipe init error:", err);
+      gestureTextEl.textContent = "ERROR";
+      effectStatusEl.textContent = "Camera access needed";
+    });
+    
+    animate();
+  </script>
+</body>
+</html>
